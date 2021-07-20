@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:riverpod/riverpod.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:firebase_dynamic_links/firebase_dynamic_links.dart';
 
 class AuthService extends StateNotifier<AuthState> {
   AuthService() : super(AuthState.initializing()) {
@@ -43,6 +44,70 @@ class AuthService extends StateNotifier<AuthState> {
     }
 
     await user.sendEmailVerification();
+  }
+
+  // Receive user email, url and others properties then send an email to user email with an authentication link
+  Future<void> signInWithEmailLinkAuth({
+    required String emailAuth,
+    required String url,
+    bool? handleCodeInApp,
+    String? iOSBundleId,
+    String? androidPackageName,
+    bool? androidInstallApp,
+    String? androidMinimunVersion,
+    String? dynamicLinkDomain,
+  }) async {
+    final acs = ActionCodeSettings(
+      url: url,
+      handleCodeInApp: handleCodeInApp,
+      iOSBundleId: iOSBundleId,
+      androidPackageName: androidPackageName,
+      androidInstallApp: androidInstallApp,
+      androidMinimumVersion: androidMinimunVersion,
+      dynamicLinkDomain: dynamicLinkDomain,
+    );
+
+    await _safeFirebaseAuth(() => _firebaseAuth.sendSignInLinkToEmail(
+          email: emailAuth,
+          actionCodeSettings: acs,
+        ));
+
+    initDynamicLinks(emailAuth);
+  }
+
+  // configuration of listeners for link callbacks when app is active or in background calling onLink
+  // when is received a email link after user click the link sent to their email
+  // and check if the income link is Sign in with email link
+  void initDynamicLinks(String emailAuth) async {
+    FirebaseDynamicLinks.instance.onLink(
+      onSuccess: (PendingDynamicLinkData? dynamicLink) async {
+        if (dynamicLink == null) return;
+        final Uri emailLink = dynamicLink.link;
+
+        verifyEmailLink(emailAuth, emailLink);
+      },
+      onError: (OnLinkErrorException e) async => print(e.message),
+    );
+
+    final PendingDynamicLinkData? data =
+        await FirebaseDynamicLinks.instance.getInitialLink();
+    final Uri? emailLink = data?.link;
+
+    if (emailLink != null) verifyEmailLink(emailAuth, emailLink);
+  }
+
+  // Verify email link and sign in
+  void verifyEmailLink(String emailAuth, Uri emailLink) {
+    if (_firebaseAuth.isSignInWithEmailLink(emailLink.toString())) {
+      _safeFirebaseAuth(
+        () => _firebaseAuth
+            .signInWithEmailLink(
+              email: emailAuth,
+              emailLink: emailLink.toString(),
+            )
+            .then((value) => print(value.user)),
+      );
+    }
   }
 
   Future<void> signInAnonymously() async {
